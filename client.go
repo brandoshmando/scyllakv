@@ -17,7 +17,11 @@ type Table struct {
 // key. If the returned value was was found, the returned bool will be true.
 func (t *Table) Get(k []byte) ([]byte, bool, error) {
 	var key, value []byte
-	err := t.client.Query(fmt.Sprintf("SELECT value FROM %v.%v WHERE key = ?", t.keyspace, t.name), k).Scan(&key, &value)
+
+	err := t.client.Query(fmt.Sprintf("SELECT key, value FROM %v.%v WHERE key = ?", t.keyspace, t.name), k).Scan(&key, &value)
+	if err == gocql.ErrNotFound {
+		return value, false, nil // prevent caller from having to handle gocql errors
+	}
 
 	return value, len(key) > 0, err
 }
@@ -30,7 +34,7 @@ func (t *Table) Put(k, v []byte) error {
 
 // Delete removes a key / value pair from a table using the given byte key
 func (t *Table) Delete(k []byte) error {
-	return t.client.Query(fmt.Sprintf("DELETE FROM %v.%v WHERE key = ?", t.keyspace, t.name)).Exec()
+	return t.client.Query(fmt.Sprintf("DELETE FROM %v.%v WHERE key = ?", t.keyspace, t.name), k).Exec()
 }
 
 // Client provides necessary components for communicating with a scylladb instance
@@ -47,7 +51,7 @@ func (c *Client) createKeyspaceIfNotExists(k string) error {
 
 // helper function for creating a table if it does not exist
 func (c *Client) createTableIfNotExists(k, n string) error {
-	return c.Query(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %v.%v (key blob PRIMARY KEY, value blob)};", k, n)).Exec()
+	return c.Query(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %v.%v (key blob PRIMARY KEY, value blob);", k, n)).Exec()
 }
 
 // CreateTableIfNotExists will create a table with the given name within the given
@@ -57,11 +61,11 @@ func (c *Client) createTableIfNotExists(k, n string) error {
 //
 // If the keyspace does not already exist, it also will be created. If
 // the given keyspace is nil, the table will be created within a keyspace named
-// 'default'.
+// 'default_'.
 func (c *Client) CreateTableIfNotExists(name string, keyspace *string) (*Table, error) {
 	var ks string
 	if keyspace == nil {
-		ks = "default"
+		ks = "default_"
 	} else {
 		ks = *keyspace
 	}
@@ -82,22 +86,26 @@ func (c *Client) CreateTableIfNotExists(name string, keyspace *string) (*Table, 
 }
 
 // Option is a function that can be used to customize the underlying gocql.ClusterConfig
-type Option func(*gocql.ClusterConfig)
+type Option func(*Client)
 
-// New accepts many Option functions that will be called on the subsequent gocql.ClusterConfig.
+// New accepts many Option functions that will be called on the underlying gocql.ClusterConfig.
 // At minimum, an option that sets the Hosts attr of the gocql.ClusterConfig must
 // be passed into the function. If a gocql.Session is created successfully, a new
 // Client will be returned.
 func New(opts ...Option) (*Client, error) {
-	c := gocql.NewCluster()
+	c := &Client{
+		ClusterConfig: gocql.NewCluster(),
+	}
+
 	for _, opt := range opts {
 		opt(c)
 	}
 
-	s, err := c.CreateSession()
+	var err error
+	c.Session, err = c.CreateSession()
 	if err != nil {
 		return nil, err
 	}
 
-	return &Client{s, c}, nil
+	return c, nil
 }
