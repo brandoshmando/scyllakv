@@ -62,6 +62,8 @@ func (c *Client) createTableIfNotExists(k, n string) error {
 // If the keyspace does not already exist, it also will be created. If
 // the given keyspace is nil, the table will be created within a keyspace named
 // 'default_'.
+//
+// Implementors are responsible for closing the client themself when it is no longer needed.
 func (c *Client) CreateTableIfNotExists(name string, keyspace *string) (*Table, error) {
 	var ks string
 	if keyspace == nil {
@@ -83,6 +85,14 @@ func (c *Client) CreateTableIfNotExists(name string, keyspace *string) (*Table, 
 		keyspace: ks,
 		name:     name,
 	}, nil
+}
+
+// Close will close the underlying scylladb session / connection.
+//
+// Because gocql.Session is embedded on clien, this could arguably be ommitted,
+// but I'd rather it be more explicit.
+func (c *Client) Close() {
+	c.Session.Close()
 }
 
 // Option is a function that can be used to customize the underlying gocql.ClusterConfig
